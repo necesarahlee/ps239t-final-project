@@ -1,0 +1,35 @@
+---
+title: "04_Merging_Datasets"
+author: "Sarah Lee"
+date: "December 13, 2015"
+output: html_document
+---
+
+```{r}
+
+#Set working directory
+setwd("~/Dropbox/Fall 2015/239T/PS239T/11_text-analysis")
+
+#Load the two csv files I want to merge
+
+#This is the table from Chinese webpage
+sermonsfull <- read.csv("Data/sermonsfull.csv", stringsAsFactors = F)
+
+#This is the csv with filename and text
+sermontexts <- read.csv("Data/sermontexts.csv", stringsAsFactors = F)
+
+#Check the column names to make sure they have a matching column
+names(sermonsfull)
+names(sermontexts)
+
+#Merge on "filename"
+allsermons <- merge(sermonsfull, sermontexts,by="filename", all.x=TRUE)
+
+#Check it worked:
+names(allsermons)
+
+#write to a csv called "allsermons.csv"
+write.csv(allsermons, file = "allsermons.csv")
+
+```
+

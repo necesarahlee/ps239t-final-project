@@ -1,0 +1,336 @@
+---
+title: "08_Text_Analysis"
+author: "Sarah Lee"
+date: "December 13, 2015"
+output: html_document
+---
+
+###1. Setup Environment
+
+```{r results="hide"}
+#Set working directory
+setwd("~/Dropbox/Fall 2015/239T/PS239T/11_text-analysis")
+
+#Clear environment
+rm(list=ls())
+
+#Load packages
+library(tm) # Framework for text mining
+library(RTextTools) # a machine learning package for text classification written in R
+library(qdap) # Quantiative discourse analysis of transcripts
+library(qdapDictionaries)
+library(dplyr) # Data preparation and pipes $>$
+library(ggplot2) # for plotting word frequencies
+library(SnowballC) # for stemming
+library(matrixStats) #for statistics
+library(wordcloud)
+library(RColorBrewer)
+```
+
+
+###2. Load data
+```{r}
+#read in csv files
+
+#china church sermons
+china <- read.csv("Data/allsermons.csv", stringsAsFactors = F)
+
+#edmond church sermons
+edmond <- read.csv("Data/edmondsermons.csv", stringsAsFactors = F)
+
+#add a column with identifying name
+china$country <- "China"
+edmond$country <- "Edmond"
+
+#Subsetting datasets
+names(china) #check column names of china
+
+#subset to only include filename, text, and country
+china <- china[,c(2,7,8)]
+names(china)
+
+#deleting rows with "NA" (those without sermon text)
+china <- na.omit(china)
+
+#combine into one file
+docs <- rbind(china, edmond)
+
+#turn into corpus
+docs <-Corpus(VectorSource(docs$text))
+  
+#Inspect the 16th element
+inspect(docs[2])
+
+#Inspect as character (it's a bit long)
+#as.character(docs[[10]])
+```
+
+###3. Preprocessing.
+
+```{r results="hide"}
+
+#I was originally going to do it in one simple code as Rochelle suggested, 
+#but I wanted to see the changes it made in every step. 
+
+docs <- tm_map(docs, content_transformer(tolower)) #to lower case
+as.character(docs[[10]])
+
+#view stopwords: stopwords("english")
+
+docs <- tm_map(docs, removeWords, stopwords("english")) # remove common words
+
+#create and remove my own list of words "church"
+church = c("something", "say", "says", "now", "things", "thing", "now", "today", "words", "god", "jesus", "gods", "said", "will", "can", "one", "going", "know", "also", "may", "want", "much", "many", "people","might","person","lord","christ","everything","man","love","come","comes","still","means","often","first","look","place","around","way","went","let","even","called","thats","make","like","time","life","lives","pasadena","beijing","china","email", "greatest","great","gloria","naomi","hagar")
+
+docs <- tm_map(docs, removeWords, church) # remove others
+
+#as.character(docs[[1]]); # see if it worked
+
+docs <- tm_map(docs, removeNumbers) #remove numbers
+          
+docs <- tm_map(docs, removePunctuation) # remove Puncturation
+
+#as.character(docs[[1]]); # see if it worked
+
+#maybe i don't want to strip white space 
+#docs <- tm_map(docs, stripWhitespace) # strip white space
+
+#changing spaces to symbols
+toSpace <- content_transformer(function(x, pattern) gsub(pattern, " ", x))
+docs <- tm_map(docs, toSpace, "/")
+docs <- tm_map(docs, toSpace, "@")
+docs <- tm_map(docs, toSpace,"\\|")
+docs <- tm_map(docs, toSpace, "X.")
+
+#words I wanted to delete after seeing results
+morewords <- c("dont","cant","didnt","haidian","jessica","katherine","jane","boaz","english.hdchurch.org","eumc","kathlyn","rev","think","just","good","see","church","never","need")
+
+docs <- tm_map(docs, removeWords, morewords) #remove more words
+
+#as.character(docs[[1]]); # see if it worked
+
+#turn into Document term matrix
+dtm <- DocumentTermMatrix(docs)
+
+dim(dtm)
+inspect(dtm[,1:5])
+
+#change to data frame
+dtm.m <- as.data.frame(as.matrix(dtm))
+
+#Subset rows: first 47 are China, the rest are Edmond sermons
+china <- dtm.m[1:47,]
+edmond <- dtm.m[48:85,]
+
+#check how many terms
+freq.c <- colSums(china)
+length(freq.c)
+
+#with emdond
+freq.e <- colSums(edmond)
+length(freq.e)
+```
+
+###4.1 Check frequencies
+
+```{r}
+# Putting the terms in order of frequency
+ord.c <- order(freq.c)
+ord.e <- order(freq.e)
+
+# Least frequent terms
+freq.c[head(ord.c)]  #China
+freq.e[head(ord.e)] #Edmond
+
+# most frequent
+freq.c[tail(ord.c)]  #China
+freq.e[tail(ord.e)]  #Edmond
+
+# frequency of frenquencies
+head(table(freq.c),15)  #China
+tail(table(freq.e),15)   #Edmond
+
+# plot
+plot(table(freq.c)) #China
+plot(table(freq.e))  #Edmond
+```
+
+Reorder columns of DTM to show most frequent terms first
+
+```{r}
+#China
+dtm.ordered.c <- dtm[,order(freq.c, decreasing = T)]
+inspect(dtm.ordered.c[1:5,1:5])
+
+#Edmond
+dtm.ordered.e <- dtm[,order(freq.e, decreasing = T)]
+inspect(dtm.ordered.e[1:5,1:5])
+```
+
+### 4.2 Exploring word frequences
+
+```{r}
+# Have a look at common words: words that appear at least 100 times
+findFreqTerms(dtm.ordered.c, lowfreq=100) # China
+findFreqTerms(dtm.ordered.e, lowfreq=100) # Edmond
+```
+
+##5. Measuring "distinctiveness"
+
+A. Unique Usage
+
+```{r}
+#Turn dtm into a dataframe
+dtm.m <- as.data.frame(as.matrix(dtm))
+
+china <- dtm.m[1:47,]
+edmond <- dtm.m[48:85,]
+
+#Summing word usage counts across both countries' sermons
+china <- colSums(china)
+edmond <- colSums(edmond)
+
+#Putting sums back into dataframe
+df <- data.frame(rbind(china, edmond))
+
+#checking to see the first five words
+df[,1:5]
+
+#Get frequent words only used in Chinese sermons
+onlychina <- unlist(df[1, edmond==0])
+onlychina <- onlychina[order(onlychina, decreasing = T)]
+onlychina[1:10]
+
+#Get frequent words only used in Edmonds sermons
+onlyed <- unlist(df[2, china==0])
+onlyed <- onlyed[order(onlyed, decreasing = T)]
+onlyed[1:10]
+#without stemming: god, one, will, world, like, way, know, even, come says
+#without church words: new, another, story, morning, book, disciplies, temple, two, together, become
+```
+
+B. Differences in Averages
+*Comparing the average rate at which authors use a word. 
+```{r}
+#normalize into proportions
+rowTotals <- rowSums(df) #creating column with row totals, total # of words per doc
+head(rowTotals)
+
+#change frequencies to proportions
+df <- df/rowTotals
+
+#how we have proportions
+df[,1:5]
+
+
+#get difference in proportions
+means.china <- df[1,]
+means.ed <- df[2,]
+score <- unlist(means.china - means.ed)
+
+#find words with highest difference
+
+score<- sort(score)
+head(score,10) #top Edmond words
+tail(score,10) #top China words 
+
+#Dividing the difference in author's average rates by the average rate across all authors.
+
+means.all <- colMeans(df)
+
+score <- score/means.all
+score <- sort(score)  #sorting in order
+
+head(score, 10) #top Edmond words
+
+tail(score, 10) #top China words
+```
+
+C. Standardized Mean Difference
+*Taking variation into account
+
+```{r}
+
+#Refresh to Start with original dataframe
+dtm.m <- as.data.frame(as.matrix(dtm))
+
+china <- dtm.m[1:47,]
+edmond <- dtm.m[48:85,]
+
+#calculate mean and variance
+means.china <- colMeans(china)
+var.china <- colVars(as.matrix(china))
+means.ed <- colMeans(edmond)
+var.ed <- colVars(as.matrix(edmond))
+
+#calculate overall score
+num <- (means.china - means.ed)
+denom <- sqrt((var.china/3) + (var.ed/3))
+score <- num/denom
+
+#remove -inf and inf - doesn't work!!!
+#score <- score[-which(score=="-Inf")]
+#score <- score[-which(score=="Inf")]
+
+#sort and view
+score <- sort(score)
+head(score,10) #top Edmondwords 
+
+tail(score,10) #top China words  
+```
+
+D. Standard Log Odds
+
+```{r}
+#calculate mean and variance
+n.china <- sum(colSums(china))
+n.ed <- sum(colSums(edmond))
+
+pi.china <- (colSums(china) +1) / (n.china + ncol(china) -1)
+pi.ed <- (colSums(edmond) + 1) / (n.ed + ncol(edmond) - 1)
+
+log.odds.ratio <- log(pi.china/(1-pi.china)) - log(pi.ed/(1-pi.ed))
+st.log.odds <- log.odds.ratio / sqrt(var(log.odds.ratio))
+
+st.log.odds <- sort(st.log.odds)
+
+head(st.log.odds, 15) #top Edmond words     
+tail(st.log.odds, 15) #top China words 
+```
+
+###6. Creating a separate plots + wordclouds
+
+```{r}
+#get word counts in decreasing order
+c_word_freqs = sort(colSums(china), decreasing = TRUE)
+e_word_freqs = sort(colSums(edmond), decreasing = TRUE)
+
+#data frame with words and their frequencies
+df.china = data.frame(word=names(c_word_freqs), freq=c_word_freqs)
+df.ed = data.frame(word=names(e_word_freqs), freq=e_word_freqs)
+
+set.seed(123)
+
+#Plot frequency for China
+c <- ggplot(subset(df.china, freq>200), aes(word, freq))
+c <-c+ geom_bar(stat="identity")
+c <-c+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+c
+
+#Plot frequency for Edmond
+e <- ggplot(subset(df.ed, freq>50), aes(word, freq))
+e <-e+ geom_bar(stat="identity")
+e <-e+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+e
+
+#Plot Wordclouds
+
+#China
+wordcloud(df.china$word, df.china$freq, random.order=FALSE, colors=brewer.pal(6, "Dark2"),min.freq=10, scale=c(4,.2),rot.per=.15,max.words=100)
+
+#Edmond
+wordcloud(df.ed$word, df.ed$freq, random.order=FALSE, colors=brewer.pal(6, "Dark2"),min.freq=10, scale=c(4,.2),rot.per=.15,max.words=100)
+
+
